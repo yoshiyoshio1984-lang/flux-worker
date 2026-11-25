@@ -86,6 +86,22 @@ else:
 pipe.enable_model_cpu_offload()
 print("Model loaded.", flush=True)
 
+# 描き直し (img2img) 用パイプライン。FluxPipeline (テキスト→画像) には
+# image 引数が無いため、別クラスの FluxImg2ImgPipeline を使う。
+# 部品 (transformer / text encoder / VAE) は上の pipe と共有するので
+# モデルの再ダウンロードは発生しない。初回の描き直し時にだけ作る。
+_img2img_pipe = None
+
+
+def _get_img2img_pipe():
+    global _img2img_pipe
+    if _img2img_pipe is None:
+        from diffusers import FluxImg2ImgPipeline
+
+        print("Loading FluxImg2ImgPipeline from FluxPipeline components ...", flush=True)
+        _img2img_pipe = FluxImg2ImgPipeline(**pipe.components)
+    return _img2img_pipe
+
 
 def _round16(n):
     return max(16, (int(n) + 8) // 16 * 16)
@@ -116,7 +132,7 @@ def handler(job):
         height = _round16(inp.get("height") or img.height)
         strength = float(inp.get("strength", 0.75))
         strength = min(1.0, max(0.0, strength))
-        image = pipe(
+        image = _get_img2img_pipe()(
             prompt=prompt,
             image=img,
             strength=strength,
