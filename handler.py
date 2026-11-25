@@ -20,7 +20,9 @@ RunPod Serverless Worker - 画像生成 (Flux.1-dev BF16 フルモデル)
   MODEL_ID - デフォルト black-forest-labs/FLUX.1-dev
 入力 (job['input']):
   prompt: str (必須)
-  negative_prompt: str (任意, Fluxでは基本使わない)
+  negative_prompt: str (任意, 避けたいものを英語で指定。
+    アプリ側が日本語プロンプトの英語化と一緒に送る。
+    例: "clothed, wearing clothes, dressed, underwear, bikini")
   image_base64: str (任意, 指定すると img2img で描き直す)
   strength: float (任意, img2imgの変更の強さ 0-1, デフォルト 0.75)
   width: int (デフォルト 1024。img2img時は元画像サイズ)
@@ -84,6 +86,10 @@ def handler(job):
 
     steps = int(inp.get("num_inference_steps", 24))
     guidance = float(inp.get("guidance_scale", 3.5))
+    # ネガティブプロンプト (任意): アプリ側が英語化と一緒に送る。
+    # 例: "clothed, wearing clothes, dressed, underwear, bikini"
+    # FluxPipeline にそのまま渡す。空なら指定なしと同じ。
+    negative_prompt = inp.get("negative_prompt", "") or ""
     seed = inp.get("seed", -1)
     if seed is None or int(seed) < 0:
         seed = random.randint(0, 2**32 - 1)
@@ -109,6 +115,7 @@ def handler(job):
             height=height,
             num_inference_steps=steps,
             guidance_scale=guidance,
+            negative_prompt=negative_prompt,
             generator=generator,
         ).images[0]
         mode = "img2img"
@@ -121,6 +128,7 @@ def handler(job):
             height=height,
             num_inference_steps=steps,
             guidance_scale=guidance,
+            negative_prompt=negative_prompt,
             generator=generator,
         ).images[0]
         mode = "txt2img"
