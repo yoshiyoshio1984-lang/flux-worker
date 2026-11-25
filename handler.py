@@ -1,28 +1,23 @@
 """
-RunPod Serverless Worker - 画像生成 (Flux.1-dev FP8)
+RunPod Serverless Worker - 画像生成 (Flux.1-dev BF16 フルモデル)
 推奨GPU: L40S 48GB (Serverless Flex $1.89/h)
-  - FP8版 (black-forest-labs/FLUX.1-dev-FP8) を使用。transformer が
-    BF16 24GB → FP8 約12GB になり、BF16版ではワーカーのディスクが
-    足りずモデルダウンロード中に "No space left on device" で落ちた
-    ため (2026-11-25)、FP8版に切り替えた。
-  - 注意: FLUX.1-dev-FP8 リポジトリは Diffusers形式ではない。
-    model_index.json が無く、flux1-dev-fp8.safetensors (12.3GB)
-    1ファイルだけのため、FluxPipeline.from_pretrained では
-    404 になる。そのため transformer だけを from_single_file で
-    読み込み、テキストエンコーダとVAEは FLUX.1-dev (BF16版、
-    同じくライセンス承認済み) から from_pretrained で読む。
-    ダウンロード総量は約24GB。VRAM使用量は約20-24GB。
-    画質はBF16とほぼ同等。FP8ファイルから読むが、重みは BF16 に
-    変換して使う (FP8のままだとテキスト側の BF16 入力と型が合わず
-    推論時に落ちるため)。
+  - BF16フルモデル (black-forest-labs/FLUX.1-dev) を from_pretrained
+    でそのまま読む。標準的で確実な読み込み方。
+  - かつて FP8版 (FLUX.1-dev-FP8) を使っていたが、FP8ファイルを
+    from_single_file で BF16 に変換して読むやり方では、生成は
+    成功するものの出力がノイズだけになった (2026-11-25 13:17 JST、
+    夕日の海岸のプロンプトでカラーの砂嵐だけが出た)。
+    diffusers 公式も「FP8 inference can be brittle」とし、直接の
+    FP8読み込みではなく optimum-quanto を推奨している。
+    そのため FP8経路は廃止し、BF16フルモデルに戻した。
+  - BF16版はモデル約24GB。以前はコンテナディスクが5GBしかなく
+    ダウンロード中に "No space left on device" で落ちたが、
+    ディスクは50GBに増やしてあるので入る。
   - 1024px / 20-28ステップで 1枚 15-20秒
   - 1枚あたり 約 $0.008-0.011 (L40S 48GB)
-  - BF16版に戻したい場合は MODEL_ID=black-forest-labs/FLUX.1-dev
-    にすれば from_pretrained 経路になる。
 環境変数:
-  HF_TOKEN - Hugging Faceトークン (FLUX.1-dev と FLUX.1-dev-FP8
-    両方のライセンス承認済みのもの)
-  MODEL_ID - デフォルト black-forest-labs/FLUX.1-dev-FP8
+  HF_TOKEN - Hugging Faceトークン (FLUX.1-dev のライセンス承認済みのもの)
+  MODEL_ID - デフォルト black-forest-labs/FLUX.1-dev
 入力 (job['input']):
   prompt: str (必須)
   negative_prompt: str (任意, Fluxでは基本使わない)
@@ -44,51 +39,17 @@ import random
 
 import runpod
 import torch
-from diffusers import FluxPipeline, FluxTransformer2DModel
+from diffusers import FluxPipeline
 
-MODEL_ID = os.environ.get("MODEL_ID", "black-forest-labs/FLUX.1-dev-FP8")
+MODEL_ID = os.environ.get("MODEL_ID", "black-forest-labs/FLUX.1-dev")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-if "fp8" in MODEL_ID.lower():
-    # FP8版は単体ファイル形式 (model_index.json が無い) なので、
-    # transformer だけ from_single_file で読み、残りは BF16版から読む。
-    # diffusers 0.32 の from_single_file は URL の扱いが不安定
-    # (リポジトリIDだと ValueError、resolve URLだとファイル名の
-    # 解決に失敗する) ため、hf_hub_download でローカルに落としてから
-    # ローカルパスを渡す。これが一番確実。
-    from huggingface_hub import hf_hub_download
-
-    print("Downloading FP8 transformer file ...", flush=True)
-    fp8_path = hf_hub_download(
-        repo_id="black-forest-labs/FLUX.1-dev-FP8",
-        filename="flux1-dev-fp8.safetensors",
-        token=HF_TOKEN,
-    )
-    print(f"Loading FP8 transformer from {fp8_path} ...", flush=True)
-    # 注意: FP8のまま読むと、テキストエンコーダからの BF16 入力と
-    # transformer の FP8 重みが合わず、推論時に
-    # "mat1 and mat2 must have the same dtype, but got BFloat16 and
-    # Float8_e4m3fn" で落ちる (diffusers 0.32 は自動で型を揃えない)。
-    # そのため FP8ファイルから読みつつ BF16 に変換して使う。
-    # ダウンロードは12GB、VRAM使用量は約24GBで48GB GPUに収まる。
-    transformer = FluxTransformer2DModel.from_single_file(
-        fp8_path,
-        torch_dtype=torch.bfloat16,
-    )
-    print("Loading text encoders + VAE from black-forest-labs/FLUX.1-dev ...", flush=True)
-    pipe = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-dev",
-        transformer=transformer,
-        torch_dtype=torch.bfloat16,
-        token=HF_TOKEN,
-    )
-else:
-    print(f"Loading {MODEL_ID} ...", flush=True)
-    pipe = FluxPipeline.from_pretrained(
-        MODEL_ID,
-        torch_dtype=torch.bfloat16,
-        token=HF_TOKEN,
-    )
+print(f"Loading {MODEL_ID} ...", flush=True)
+pipe = FluxPipeline.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.bfloat16,
+    token=HF_TOKEN,
+)
 # Safety CheckerはFluxPipelineには標準で入っていない。
 # オープンウェイトを自分でホストする構成なので、ここでフィルタはかけない。
 pipe.enable_model_cpu_offload()
