@@ -4,17 +4,22 @@ RunPod Serverless Worker - 画像生成 (Flux.1-dev FP8)
   - FP8版 (black-forest-labs/FLUX.1-dev-FP8) を使用。transformer が
     BF16 24GB → FP8 約12GB になり、BF16版ではワーカーのディスクが
     足りずモデルダウンロード中に "No space left on device" で落ちた
-    ため (2026-11-25)、FP8版に切り替えた。テキストエンコーダは
-    BF16のままのため、ダウンロード総量は約24GB。
-    VRAM使用量は約20-24GB。画質はBF16とほぼ同等。
+    ため (2026-11-25)、FP8版に切り替えた。
+  - 注意: FLUX.1-dev-FP8 リポジトリは Diffusers形式ではない。
+    model_index.json が無く、flux1-dev-fp8.safetensors (12.3GB)
+    1ファイルだけのため、FluxPipeline.from_pretrained では
+    404 になる。そのため transformer だけを from_single_file で
+    読み込み、テキストエンコーダとVAEは FLUX.1-dev (BF16版、
+    同じくライセンス承認済み) から from_pretrained で読む。
+    ダウンロード総量は約24GB。VRAM使用量は約20-24GB。
+    画質はBF16とほぼ同等。
   - 1024px / 20-28ステップで 1枚 15-20秒
   - 1枚あたり 約 $0.008-0.011 (L40S 48GB)
   - BF16版に戻したい場合は MODEL_ID=black-forest-labs/FLUX.1-dev
-    にすれば自動で torch.bfloat16 になる。
+    にすれば from_pretrained 経路になる。
 環境変数:
-  HF_TOKEN - Hugging Faceトークン (Flux.1-dev / FLUX.1-dev-FP8 の
-    ライセンス承認済みのもの。FP8版は別リポジトリのため、HF側で
-    FLUX.1-dev-FP8 へのアクセス承認も必要な場合がある)
+  HF_TOKEN - Hugging Faceトークン (FLUX.1-dev と FLUX.1-dev-FP8
+    両方のライセンス承認済みのもの)
   MODEL_ID - デフォルト black-forest-labs/FLUX.1-dev-FP8
 入力 (job['input']):
   prompt: str (必須)
@@ -37,20 +42,34 @@ import random
 
 import runpod
 import torch
-from diffusers import FluxPipeline
+from diffusers import FluxPipeline, FluxTransformer2DModel
 
 MODEL_ID = os.environ.get("MODEL_ID", "black-forest-labs/FLUX.1-dev-FP8")
-# FP8版は float8_e4m3fn、BF16版は bfloat16 で読み込む
-TORCH_DTYPE = (
-    torch.float8_e4m3fn if "fp8" in MODEL_ID.lower() else torch.bfloat16
-)
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
-print(f"Loading {MODEL_ID} (dtype={TORCH_DTYPE}) ...", flush=True)
-pipe = FluxPipeline.from_pretrained(
-    MODEL_ID,
-    torch_dtype=TORCH_DTYPE,
-    token=os.environ.get("HF_TOKEN"),
-)
+if "fp8" in MODEL_ID.lower():
+    # FP8版は単体ファイル形式 (model_index.json が無い) なので、
+    # transformer だけ from_single_file で読み、残りは BF16版から読む
+    print(f"Loading FP8 transformer from {MODEL_ID} ...", flush=True)
+    transformer = FluxTransformer2DModel.from_single_file(
+        MODEL_ID,
+        torch_dtype=torch.float8_e4m3fn,
+        token=HF_TOKEN,
+    )
+    print("Loading text encoders + VAE from black-forest-labs/FLUX.1-dev ...", flush=True)
+    pipe = FluxPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-dev",
+        transformer=transformer,
+        torch_dtype=torch.bfloat16,
+        token=HF_TOKEN,
+    )
+else:
+    print(f"Loading {MODEL_ID} ...", flush=True)
+    pipe = FluxPipeline.from_pretrained(
+        MODEL_ID,
+        torch_dtype=torch.bfloat16,
+        token=HF_TOKEN,
+    )
 # Safety CheckerはFluxPipelineには標準で入っていない。
 # オープンウェイトを自分でホストする構成なので、ここでフィルタはかけない。
 pipe.enable_model_cpu_offload()
