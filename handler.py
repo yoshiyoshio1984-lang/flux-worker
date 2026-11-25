@@ -105,6 +105,12 @@ def handler(job):
     # 例: "clothed, wearing clothes, dressed, underwear, bikini"
     # FluxPipeline にそのまま渡す。空なら指定なしと同じ。
     negative_prompt = inp.get("negative_prompt", "") or ""
+    # ネガティブプロンプトは true_cfg_scale > 1 のときだけ効く
+    # (diffusers の Flux は true CFG でのみネガティブを使う)。
+    # true_cfg_scale を渡さない (既定 1.0) とネガティブは無視される。
+    # ネガティブがあるときだけ 2.0 にする。
+    # 注意: true CFG は計算が約2倍になる (生成時間・料金も約2倍)。
+    true_cfg_scale = 2.0 if negative_prompt else 1.0
     seed = inp.get("seed", -1)
     if seed is None or int(seed) < 0:
         seed = random.randint(0, 2**32 - 1)
@@ -122,11 +128,10 @@ def handler(job):
         height = _round16(inp.get("height") or img.height)
         strength = float(inp.get("strength", 0.75))
         strength = min(1.0, max(0.0, strength))
-        # 注意: diffusers 0.32.2 の FluxImg2ImgPipeline.__call__ は
-        # negative_prompt 引数を受け付けないため、ここでは渡さない。
-        # (渡すと "got an unexpected keyword argument 'negative_prompt'"
-        # で失敗する。2026-11-25 18:03 JST のジョブ 12a409d1 で確認。
-        # テキスト→画像側の FluxPipeline は受け付けるので、そちらだけ渡す。)
+        # diffusers 0.35.1 の FluxImg2ImgPipeline.__call__ は
+        # negative_prompt / true_cfg_scale を受け付ける。
+        # (0.32.2 では受け付けず TypeError になったため、一時的に
+        # 渡さない修正を入れていたが、0.35.1 への更新で元に戻す。)
         image = _get_img2img_pipe()(
             prompt=prompt,
             image=img,
@@ -135,6 +140,8 @@ def handler(job):
             height=height,
             num_inference_steps=steps,
             guidance_scale=guidance,
+            negative_prompt=negative_prompt,
+            true_cfg_scale=true_cfg_scale,
             generator=generator,
         ).images[0]
         mode = "img2img"
@@ -148,6 +155,7 @@ def handler(job):
             num_inference_steps=steps,
             guidance_scale=guidance,
             negative_prompt=negative_prompt,
+            true_cfg_scale=true_cfg_scale,
             generator=generator,
         ).images[0]
         mode = "txt2img"

@@ -8,7 +8,15 @@
 --extra-index-url https://download.pytorch.org/whl/cu128
 torch==2.8.0+cu128
 torchvision==0.23.0+cu128
-diffusers==0.32.2
+# diffusers は 0.35.1 に上げる。0.32.2 では FluxImg2ImgPipeline.__call__ が
+# negative_prompt を受け付けず、画像編集で服を避ける指定が使えなかった
+# (2026-11-25 18:03 JST の TypeError)。0.35.1 は __call__ で
+# negative_prompt / true_cfg_scale を受け付ける (wheel のソースで確認済み)。
+# さらにネガティブは true_cfg_scale > 1 のときだけ効くため、
+# handler 側でもネガティブがあるときだけ true_cfg_scale=2.0 を渡す。
+# Wan は既に 0.35.1 で動いているので、torch 2.8.0 / transformers 4.46.3
+# との併用も実績あり。
+diffusers==0.35.1
 transformers==4.46.3
 accelerate==0.34.2
 runpod
