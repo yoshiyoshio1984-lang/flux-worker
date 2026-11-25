@@ -122,6 +122,11 @@ def handler(job):
         height = _round16(inp.get("height") or img.height)
         strength = float(inp.get("strength", 0.75))
         strength = min(1.0, max(0.0, strength))
+        # 注意: diffusers 0.32.2 の FluxImg2ImgPipeline.__call__ は
+        # negative_prompt 引数を受け付けないため、ここでは渡さない。
+        # (渡すと "got an unexpected keyword argument 'negative_prompt'"
+        # で失敗する。2026-11-25 18:03 JST のジョブ 12a409d1 で確認。
+        # テキスト→画像側の FluxPipeline は受け付けるので、そちらだけ渡す。)
         image = _get_img2img_pipe()(
             prompt=prompt,
             image=img,
@@ -130,7 +135,6 @@ def handler(job):
             height=height,
             num_inference_steps=steps,
             guidance_scale=guidance,
-            negative_prompt=negative_prompt,
             generator=generator,
         ).images[0]
         mode = "img2img"
