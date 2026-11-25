@@ -49,10 +49,17 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if "fp8" in MODEL_ID.lower():
     # FP8版は単体ファイル形式 (model_index.json が無い) なので、
-    # transformer だけ from_single_file で読み、残りは BF16版から読む
-    print(f"Loading FP8 transformer from {MODEL_ID} ...", flush=True)
+    # transformer だけ from_single_file で読み、残りは BF16版から読む。
+    # diffusers 0.32 の from_single_file はリポジトリIDではなく
+    # ファイルの直接URLを要求するため、resolve URLを渡す。
+    # (リポジトリIDを渡すと ValueError: Invalid pretrained_model_name_or_path)
+    FP8_URL = (
+        "https://huggingface.co/black-forest-labs/FLUX.1-dev-FP8"
+        "/resolve/main/flux1-dev-fp8.safetensors"
+    )
+    print(f"Loading FP8 transformer from {FP8_URL} ...", flush=True)
     transformer = FluxTransformer2DModel.from_single_file(
-        MODEL_ID,
+        FP8_URL,
         torch_dtype=torch.float8_e4m3fn,
         token=HF_TOKEN,
     )
