@@ -50,18 +50,22 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 if "fp8" in MODEL_ID.lower():
     # FP8版は単体ファイル形式 (model_index.json が無い) なので、
     # transformer だけ from_single_file で読み、残りは BF16版から読む。
-    # diffusers 0.32 の from_single_file はリポジトリIDではなく
-    # ファイルの直接URLを要求するため、resolve URLを渡す。
-    # (リポジトリIDを渡すと ValueError: Invalid pretrained_model_name_or_path)
-    FP8_URL = (
-        "https://huggingface.co/black-forest-labs/FLUX.1-dev-FP8"
-        "/resolve/main/flux1-dev-fp8.safetensors"
-    )
-    print(f"Loading FP8 transformer from {FP8_URL} ...", flush=True)
-    transformer = FluxTransformer2DModel.from_single_file(
-        FP8_URL,
-        torch_dtype=torch.float8_e4m3fn,
+    # diffusers 0.32 の from_single_file は URL の扱いが不安定
+    # (リポジトリIDだと ValueError、resolve URLだとファイル名の
+    # 解決に失敗する) ため、hf_hub_download でローカルに落としてから
+    # ローカルパスを渡す。これが一番確実。
+    from huggingface_hub import hf_hub_download
+
+    print("Downloading FP8 transformer file ...", flush=True)
+    fp8_path = hf_hub_download(
+        repo_id="black-forest-labs/FLUX.1-dev-FP8",
+        filename="flux1-dev-fp8.safetensors",
         token=HF_TOKEN,
+    )
+    print(f"Loading FP8 transformer from {fp8_path} ...", flush=True)
+    transformer = FluxTransformer2DModel.from_single_file(
+        fp8_path,
+        torch_dtype=torch.float8_e4m3fn,
     )
     print("Loading text encoders + VAE from black-forest-labs/FLUX.1-dev ...", flush=True)
     pipe = FluxPipeline.from_pretrained(
