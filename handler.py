@@ -12,7 +12,9 @@ RunPod Serverless Worker - 画像生成 (Flux.1-dev FP8)
     読み込み、テキストエンコーダとVAEは FLUX.1-dev (BF16版、
     同じくライセンス承認済み) から from_pretrained で読む。
     ダウンロード総量は約24GB。VRAM使用量は約20-24GB。
-    画質はBF16とほぼ同等。
+    画質はBF16とほぼ同等。FP8ファイルから読むが、重みは BF16 に
+    変換して使う (FP8のままだとテキスト側の BF16 入力と型が合わず
+    推論時に落ちるため)。
   - 1024px / 20-28ステップで 1枚 15-20秒
   - 1枚あたり 約 $0.008-0.011 (L40S 48GB)
   - BF16版に戻したい場合は MODEL_ID=black-forest-labs/FLUX.1-dev
@@ -63,9 +65,15 @@ if "fp8" in MODEL_ID.lower():
         token=HF_TOKEN,
     )
     print(f"Loading FP8 transformer from {fp8_path} ...", flush=True)
+    # 注意: FP8のまま読むと、テキストエンコーダからの BF16 入力と
+    # transformer の FP8 重みが合わず、推論時に
+    # "mat1 and mat2 must have the same dtype, but got BFloat16 and
+    # Float8_e4m3fn" で落ちる (diffusers 0.32 は自動で型を揃えない)。
+    # そのため FP8ファイルから読みつつ BF16 に変換して使う。
+    # ダウンロードは12GB、VRAM使用量は約24GBで48GB GPUに収まる。
     transformer = FluxTransformer2DModel.from_single_file(
         fp8_path,
-        torch_dtype=torch.float8_e4m3fn,
+        torch_dtype=torch.bfloat16,
     )
     print("Loading text encoders + VAE from black-forest-labs/FLUX.1-dev ...", flush=True)
     pipe = FluxPipeline.from_pretrained(
