@@ -70,7 +70,22 @@ def _get_img2img_pipe():
         from diffusers import FluxImg2ImgPipeline
 
         print("Loading FluxImg2ImgPipeline from FluxPipeline components ...", flush=True)
-        _img2img_pipe = FluxImg2ImgPipeline(**pipe.components)
+        # FluxImg2ImgPipeline には image_encoder を渡してはいけない。
+        # FluxPipeline の components には image_encoder が含まれるが、
+        # diffusers 0.32.2 の FluxImg2ImgPipeline.__init__ には
+        # image_encoder 引数が無いため、**pipe.components だと
+        # "got an unexpected keyword argument 'image_encoder'" で
+        # 失敗する (2026-11-25 16:57 JST)。必要な部品だけ明示して渡す。
+        c = pipe.components
+        _img2img_pipe = FluxImg2ImgPipeline(
+            scheduler=c["scheduler"],
+            text_encoder=c["text_encoder"],
+            tokenizer=c["tokenizer"],
+            text_encoder_2=c["text_encoder_2"],
+            tokenizer_2=c["tokenizer_2"],
+            vae=c["vae"],
+            transformer=c["transformer"],
+        )
     return _img2img_pipe
 
 
